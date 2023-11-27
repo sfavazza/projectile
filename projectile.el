@@ -976,6 +976,12 @@ The saved data can be restored with `projectile-unserialize'."
   (make-hash-table :test 'equal)
   "Cached `projectile-file-exists-p' results.")
 
+(defvar projectile--modified-dirlocals-ht
+  (make-hash-table :test 'equal)
+  "Hash table keeping track of the projectile commands modifications
+in the .dir-locals.el file. Refer to
+`projectile-update-modified-dirlocals-ht' for info about its structure.")
+
 (defvar projectile-file-exists-cache-timer nil
   "Timer for scheduling`projectile-file-exists-cache-cleanup'.")
 
@@ -1023,6 +1029,87 @@ A wrapper around `file-exists-p' with additional caching support."
           (setq projectile-file-exists-cache-timer
                 (run-with-timer 10 nil 'projectile-file-exists-cache-cleanup)))
         (equal value 'found)))))
+
+(defconst projectile--cmd-symbol-list (list 'projectile-project-configure-cmd
+                                            'projectile-project-compilation-cmd
+                                            'projectile-project-test-cmd
+                                            'projectile-project-install-cmd
+                                            'projectile-project-package-cmd
+                                            'projectile-project-run-cmd)
+  "List of projectile recognized commands.")
+(defun projectile-update-modified-dirlocals-ht ()
+  "Update/populate `projectile--modified-dirlocals-ht' hash-table.
+
+Detect modified projectile commands in the .dir-locals.el file
+and flag them in the hast-table.
+
+The hash table has the following structure:
+- keys: compilation dir(s)
+- values: hash tables
+  - keys: projectile command symbol names (e.g. `projectile-project-test-cmd')
+  - values: property list '(last <last-command-string> changed? <t-if-cmd-changed-nil-otherwise>)"
+  (interactive)
+  (let* ((comp-dir (projectile-compilation-dir))
+         (proj-cmds-changed-cache (gethash comp-dir
+                                           projectile--modified-dirlocals-ht)))
+    ;; update the existing cache
+    (if proj-cmds-changed-cache
+        ;; check whether the actual command differ from the latest got from the .dir-locals.el file
+        (cl-mapc (lambda (cmd)
+                   (let ((cmd-plist (gethash cmd proj-cmds-changed-cache))
+                         (dir-local-cmd (symbol-value cmd)))
+                     ;; Set the flag when the actual command (provided by
+                     ;; .dir-locals.el) differs from the latest registered. The
+                     ;; flag can be cleared only on any of the affected commands
+                     ;; invocation
+                     (when (not (string= dir-local-cmd
+                                       (plist-get cmd-plist 'last)))
+                         (plist-put cmd-plist 'changed? t)
+                         (plist-put cmd-plist 'last dir-local-cmd))))
+                 projectile--cmd-symbol-list)
+      ;; populate the hash-table for the current project entry
+      (puthash comp-dir
+               (projectile--create-cmds-status-ht)
+               projectile--modified-dirlocals-ht))))
+
+(defun projectile--sel-cmd-cached-or-new-dir-locals (compile-dir prj-cmd-name cached-cmds)
+  "Get either cached PRJ-CMD-NAME value or the last .dir-locals.el provided
+
+Based on the absolute COMPILE-DIR find the target hash-table associated to
+the current project. Hence pick in this order:
+1. - the project locally defined project command
+2. - the value CACHED-CMDS (if any)
+
+If no change is detected in the .dir-local.el, get the cached value (if any)."
+  ;; check whether a new version of PRJ-CMD-NAME is available in the .dir-locals.el
+  (let* ((current-prj-cmds-status-ht (or (gethash compile-dir projectile--modified-dirlocals-ht)
+                                         (projectile-update-modified-dirlocals-ht)))
+         (cmd-plist (gethash prj-cmd-name current-prj-cmds-status-ht))
+         (cached (gethash compile-dir cached-cmds)))
+    (cond
+     ;; if no cached pick local unconditionally
+     ((not cached)
+      (symbol-value prj-cmd-name))
+     ;; check whether an updated cmd is detected
+     ((plist-get cmd-plist 'changed?)
+      (plist-put cmd-plist 'changed? nil) ; clear flag
+      (plist-get cmd-plist 'last))
+     ;; pick the cached value
+     (t
+      cached))))
+
+(defun projectile--create-cmds-status-ht ()
+  "Create a hash table to keep track of single project commands changes in
+.dir-locals.el."
+  (let ((cmds-ht (make-hash-table :test 'equal)))
+    (cl-mapc (lambda (cmd) (puthash cmd
+                                    ;; assume no changes when initializing the hash-table
+                                    (list 'last (symbol-value cmd)
+                                          'changed? nil)
+                                    cmds-ht))
+             projectile--cmd-symbol-list)
+    ;; return created hash table
+    cmds-ht))
 
 ;;;###autoload
 (defun projectile-invalidate-cache (prompt)
@@ -5021,9 +5108,13 @@ configure command that was invoked on the project
 via .dir-locals.el
 
 - finally we check for the default configure command for a
-project of that type"
-  (or (gethash compile-dir projectile-configure-cmd-map)
-      projectile-project-configure-cmd
+project of that type
+
+When the .dir-locals.el gets updated the new value take precedence over the
+cached one (refer to `projectile-update-modified-dirlocals-ht')"
+  (or (projectile--sel-cmd-cached-or-new-dir-locals compile-dir
+                                                    'projectile-project-configure-cmd
+                                                    projectile-configure-cmd-map)
       (let ((cmd-format-string (projectile-default-configure-command (projectile-project-type))))
         (when cmd-format-string
           (format cmd-format-string (projectile-project-root) compile-dir)))))
@@ -5139,7 +5230,7 @@ project of that type"
                           'compile-history))))
 
 (defun projectile-compilation-dir ()
-  "Retrieve the compilation directory for this project."
+  "Retrieve the absolute path to the compilation directory for this project."
   (let* ((type (projectile-project-type))
          (directory (or projectile-project-compilation-dir
                         (projectile-default-compilation-dir type))))
