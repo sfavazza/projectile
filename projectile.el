@@ -186,6 +186,13 @@ A value of nil means the cache never expires."
   :type '(choice (const :tag "Disabled" nil)
                  (integer :tag "Seconds")))
 
+(defcustom projectile-auto-update-cmds-with-dir-locals nil
+  "When t, projectile adds append a hook for the dir-locals, such that,
+ when it is modified, the values are scanned and eventually used to update
+the projectile internal cache."
+  :group 'projectile
+  :type 'boolean)
+
 (defcustom projectile-auto-discover t
   "Whether to discover projects when `projectile-mode' is activated."
   :group 'projectile
@@ -1037,6 +1044,15 @@ A wrapper around `file-exists-p' with additional caching support."
                                             'projectile-project-package-cmd
                                             'projectile-project-run-cmd)
   "List of projectile recognized commands.")
+
+;; optionally allow to keep projectile cache in sync with the new .dir-locals.el values
+(when projectile-auto-update-cmds-with-dir-locals
+  (add-hook 'after-save-hook (lambda ()
+                               (when (string= major-mode 'lisp-data-mode)
+                                 ;; apply last saved command configuration
+                                 (revert-buffer)
+                                 (projectile-update-modified-dirlocals-ht)))))
+
 (defun projectile-update-modified-dirlocals-ht ()
   "Update/populate `projectile--modified-dirlocals-ht' hash-table.
 
@@ -1054,7 +1070,7 @@ The hash table has the following structure:
                                            projectile--modified-dirlocals-ht)))
     ;; update the existing cache
     (if proj-cmds-changed-cache
-        ;; check whether the actual command differ from the latest got from the .dir-locals.el file
+        ;; check whether the actual command differs from the latest got from the .dir-locals.el file
         (cl-mapc (lambda (cmd)
                    (let ((cmd-plist (gethash cmd proj-cmds-changed-cache))
                          (dir-local-cmd (symbol-value cmd)))
@@ -5146,7 +5162,10 @@ compile command that was invoked on the project
 via .dir-locals.el
 
 - finally we check for the default compilation command for a
-project of that type"
+project of that type
+
+When the .dir-locals.el gets updated the new value take precedence over the
+cached one (refer to `projectile-update-modified-dirlocals-ht')"
   (or (gethash compile-dir projectile-compilation-cmd-map)
       projectile-project-compilation-cmd
       (projectile-default-compilation-command (projectile-project-type))))
@@ -5163,7 +5182,10 @@ test command that was invoked on the project
 via .dir-locals.el
 
 - finally we check for the default test command for a
-project of that type"
+project of that type
+
+When the .dir-locals.el gets updated the new value take precedence over the
+cached one (refer to `projectile-update-modified-dirlocals-ht')"
   (or (gethash compile-dir projectile-test-cmd-map)
       projectile-project-test-cmd
       (projectile-default-test-command (projectile-project-type))))
@@ -5180,7 +5202,10 @@ install command that was invoked on the project
 via .dir-locals.el
 
 - finally we check for the default install command for a
-project of that type"
+project of that type
+
+When the .dir-locals.el gets updated the new value take precedence over the
+cached one (refer to `projectile-update-modified-dirlocals-ht')"
   (or (gethash compile-dir projectile-install-cmd-map)
       projectile-project-install-cmd
       (projectile-default-install-command (projectile-project-type))))
@@ -5197,7 +5222,10 @@ install command that was invoked on the project
 via .dir-locals.el
 
 - finally we check for the default package command for a
-project of that type"
+project of that type
+
+When the .dir-locals.el gets updated the new value take precedence over the
+cached one (refer to `projectile-update-modified-dirlocals-ht')"
   (or (gethash compile-dir projectile-package-cmd-map)
       projectile-project-package-cmd
       (projectile-default-package-command (projectile-project-type))))
@@ -5214,7 +5242,10 @@ run command that was invoked on the project
 via .dir-locals.el
 
 - finally we check for the default run command for a
-project of that type"
+project of that type
+
+When the .dir-locals.el gets updated the new value take precedence over the
+cached one (refer to `projectile-update-modified-dirlocals-ht')"
   (or (gethash compile-dir projectile-run-cmd-map)
       projectile-project-run-cmd
       (projectile-default-run-command (projectile-project-type))))
