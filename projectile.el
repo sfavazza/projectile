@@ -5139,7 +5139,7 @@ project of that type"
                           'compile-history))))
 
 (defun projectile-compilation-dir ()
-  "Retrieve the compilation directory for this project."
+  "Retrieve the absolute path to the compilation directory of this project."
   (let* ((type (projectile-project-type))
          (directory (or projectile-project-compilation-dir
                         (projectile-default-compilation-dir type))))
