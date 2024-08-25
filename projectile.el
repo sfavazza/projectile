@@ -1024,6 +1024,33 @@ A wrapper around `file-exists-p' with additional caching support."
                 (run-with-timer 10 nil 'projectile-file-exists-cache-cleanup)))
         (equal value 'found)))))
 
+(defconst projectile--cmd-symbol-list (list 'projectile-project-configure-cmd
+                                            'projectile-project-compilation-cmd
+                                            'projectile-project-install-cmd
+                                            'projectile-project-package-cmd
+                                            'projectile-project-test-cmd
+                                            'projectile-project-run-cmd)
+  "List of projectile recognized commands.")
+(defconst projectile--cmd-caches-ht-list (list 'projectile-configure-cmd-map
+                                               'projectile-compilation-cmd-map
+                                               'projectile-install-cmd-map
+                                               'projectile-package-cmd-map
+                                               'projectile-test-cmd-map
+                                               'projectile-run-cmd-map))
+
+(defun projectile-update-cache-w-dirlocals-values ()
+  "Force cache update for each known command (see
+`projectile--cmd-symbol-list') with the defined in dir-locals.el"
+  (interactive)
+  (hack-dir-local-variables-non-file-buffer) ; reload the dir-locals content
+  (if projectile-project-enable-cmd-caching
+      (cl-mapc (lambda (command command-map)
+                 (puthash (projectile-compilation-dir)
+                          (symbol-value command)
+                          (symbol-value command-map)))
+               projectile--cmd-symbol-list
+               projectile--cmd-caches-ht-list)))
+
 ;;;###autoload
 (defun projectile-invalidate-cache (prompt)
   "Remove the current project's files from `projectile-projects-cache'.
